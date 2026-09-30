@@ -1,0 +1,126 @@
+# 離線法律工作站套件（offline-legal-kit）
+
+讓 [Legal-Pleading-Suite](https://github.com/lexchang53/Legal-Pleading-Suite) 在**完全離線**的單機上運作，並與 DeepForge（訓練）、DeepSafe（安全）共用一張 RTX 5070 Ti（16GB）。
+
+原本的套件有兩處需要連網：
+
+| 原本 | 離線替代 |
+|---|---|
+| 裁判、函釋、法條檢索送到 `tlr.dr-legal.com.tw` | **`tlr_local`**：相容 twlegalrag 的本機檢索服務，資料來自自行下載的公開資料 |
+| 撰狀的 AI 在雲端（Claude Code、Antigravity、Codex 等） | **`scripts/start-llm.sh`**：llama.cpp 本機模型，提供 OpenAI 相容 API |
+
+Legal-Pleading-Suite 和 twlegalrag **一行都不用改**。twlegalrag 本來就可以設定連線端點，`tlr_local` 實作同一組 API（`/v1/search`、`/v1/fulltext`、`/v1/law_article`、`/v1/legal_reference`、`/v1/legal_references/search`、`/v1/health`），`pack`、`check`、`law`、`ref`、`ref-search` 和套件的 `scripts/check.py` 都照常運作。
+
+`tlr_local` 只用 Python 標準函式庫（3.10 以上），離線機器不需要額外安裝套件。
+
+---
+
+## 一、GPU 分配（RTX 5070 Ti 16GB）
+
+| 項目 | VRAM | 說明 |
+|---|---|---|
+| 螢幕輸出 | 0 | 接主機板內顯 |
+| `tlr_local` 檢索 | 0 | SQLite 全文檢索，純 CPU |
+| DeepSafe 規則式個資遮蔽（`tlr_local/pii.py`） | 0 | 純 CPU |
+| 本機 LLM（30B 級 MoE，expert 放系統記憶體） | 約 3–6GB | `CPU_MOE` 越大越省 |
+| DeepForge 訓練（8B QLoRA） | 約 9–11GB | 見下方建議設定 |
+
+VRAM 數字為估計值，實際以 `watch -n 1 nvidia-smi` 為準。DeepSafe 若另有 GPU 模型，須再扣除它的用量。
+
+DeepForge 建議設定：4-bit QLoRA、gradient checkpointing、batch 1 搭配 gradient accumulation、paged AdamW 8-bit，序列長度 2048–4096；啟動前設 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`。
+
+---
+
+## 二、準備資料（在可上網的電腦下載，再搬進離線機）
+
+1. **裁判書**：司法院資料開放平臺（opendata.judicial.gov.tw）的裁判書資料，每月一包 RAR，**先解壓縮**成 JSON。每筆欄位為 `JID / JYEAR / JCASE / JNO / JDATE / JTITLE / JFULL`。
+2. **法規**：全國法規資料庫（law.moj.gov.tw）開放資料的 `ChLaw.json`（法律）與 `ChOrder.json`（命令），zip 檔可直接匯入。
+3. **函釋**（選用）：沒有單一官方開放資料集，請自行整理成 JSONL，一行一筆：
+   ```json
+   {"authority":"財政部","serial_no":"台財稅第881945861號","title":"…","issue_date":"1999-07-01","status":"active","fulltext":"…","source_url":"…"}
+   ```
+   `status` 使用 `active`、`repealed`、`superseded` 等值，twlegalrag 會依此標色。
+
+---
+
+## 三、安裝與啟動
+
+```bash
+cd offline-legal-kit
+export TLR_LOCAL_DB=/data/tlr_local.sqlite       # 放在資料碟，不要放系統碟
+
+# 匯入（可重複執行，同一 JID 會覆蓋）
+python -m tlr_local ingest-judgments /data/judicial/2026-08/ /data/judicial/2026-07/
+python -m tlr_local ingest-laws /data/moj/ChLaw.zip /data/moj/ChOrder.zip
+python -m tlr_local ingest-refs /data/refs/*.jsonl
+python -m tlr_local stats
+
+# 啟動檢索服務（預設只綁 127.0.0.1:8787）
+python -m tlr_local serve
+
+# 讓 twlegalrag 永久改連本機
+./scripts/configure-twlegalrag.sh
+twlegalrag search "違約金 過高 酌減" -n 5
+```
+
+`twlegalrag` 在離線機上的安裝：在可上網的電腦執行 `pip download twlegalrag -d wheels`，把 `wheels/` 搬過去，再執行 `pip install --no-index --find-links wheels twlegalrag`。
+
+> **環境變數優先於設定檔。** 如果系統裡設了 `TWLEGALRAG_TLR_BASE_URL` 指向公開端點，它會蓋過 `configure-twlegalrag.sh` 寫入的設定。離線機建議再用防火牆封鎖所有對外連線，雙重保險。
+
+### 本機 LLM
+
+```bash
+MODEL=/models/<30B 級 MoE 模型>-Q4_K_M.gguf ./scripts/start-llm.sh
+# OpenAI 相容端點：http://127.0.0.1:8080/v1，模型名稱 local-legal
+```
+
+VRAM 不夠時調大 `CPU_MOE`，或把 `CTX` 從 32768 降到 16384。`--jinja` 開啟工具呼叫格式，Agent 執行 skill 時需要。
+
+撰狀需要一個能在本機執行 skill 的 Agent 工具，並把它的模型端點設成上面的 OpenAI 相容 API。請選用支援「自訂 OpenAI 相容端點」的工具，並確認它在斷網時可以運作。
+
+本機模型的撰狀品質明顯低於雲端大型模型。產出一律要經過 `check.py` 驗證，並由律師逐條核對。
+
+---
+
+## 四、匯出 DeepForge 訓練語料
+
+```bash
+python -m tlr_local export-training /data/train/civil.jsonl --category 民事 --year-from 105
+python -m tlr_local export-training /data/train/supreme.jsonl --court 最高法院
+```
+
+- 輸出 JSONL，每行 `{"text": "<字號>\n\n<理由段>", "doc_id": "..."}`，可直接用於繼續預訓練（continued pretraining）。
+- 預設只取「理由」或「事實及理由」段落，並截在 16,000 字；加 `--full` 輸出全文。
+- 輸出前會遮蔽身分證號、手機、市話、Email、信用卡號，以及標示為帳號的數字。各類遮蔽次數會列在統計中。
+- 姓名、地址這類需要語意判斷的個資**不在遮蔽範圍**。司法院公開資料已先遮蔽當事人姓名；如果要混入客戶自己的案卷，必須另外處理。
+
+---
+
+## 五、授權與資料來源
+
+- **只能用自行下載的公開資料訓練。** tw-legal-rag 的服務條款（TERMS.md）禁止把 `tlr.dr-legal.com.tw` 回傳的內容拿來訓練或微調模型，也禁止大量匯出它的資料庫。`tlr_local` 完全不連該服務。
+- **Legal-Pleading-Suite** 採 CC BY-NC-SA 4.0 授權，另附豁免條款。要整合進收費產品，須先取得作者的書面授權。
+- **twlegalrag client** 採 Elastic License 2.0 授權。本套件沒有複製它的程式碼，只實作相容的 HTTP API。
+
+---
+
+## 六、限制
+
+- **排序方式**：使用 BM25 關鍵字排序（中文以兩字一組切詞），沒有語意向量檢索。查詢請用具體法律用語，例如「違約金 過高 酌減」，不要用口語描述。
+- **單字詞查不到**：單一個中文字無法當作查詢詞，至少要兩個字。
+- **沒有審級歷程**：`case_history` 一律為 `null`。搜尋結果會附註「未收錄審級歷程」，所以不能據此推論判決已確定。
+- **法院名稱**：從全文開頭解析。解析失敗時會退回 JID 裡的法院代碼（例如 `TPSV`）。
+- **容量與速度**（合成資料實測，真實資料會落在兩者之間）：
+  - 資料庫大小約為原始 JSON 的 0.7–1.6 倍。接近判決用語的文字實測 0.72 倍；隨機文字是最差情況，1.6 倍。全文用 zlib 壓縮存放，另加 bigram 索引。
+  - 匯入速度每秒約 70–350 筆，視篇幅而定。全量裁判書要跑一天以上，建議按月分批匯入。
+  - 全量裁判書（約兩千萬篇）估計要數百 GB 到 1TB 以上，加上模型和訓練 checkpoint，**1TB SSD 不夠**。空間有限時可以：
+    - 只匯入需要的年份和法院。
+    - 用 `--index-chars 20000` 只索引每篇的前 2 萬字，全文照樣完整保存。
+
+## 測試
+
+```bash
+python -m unittest discover -s tests
+```
+
+有安裝 `twlegalrag` 時，測試會另外用真正的 client 連線到本機服務，端對端驗證 `pack`、`check`、`law`、`ref`、`ref-search`。`tests/fixtures` 裡的裁判書是測試用的合成資料，不是真實案件。
