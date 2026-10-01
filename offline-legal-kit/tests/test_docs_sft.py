@@ -108,6 +108,59 @@ class DocsTest(unittest.TestCase):
         self.assertEqual(docs.search_docs(a, "消滅時效")[0]["page"], 1)
 
 
+class MarkdownExportTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.src = self.dir / "src"
+        self.src.mkdir()
+        write_docx(self.src / "起訴狀.docx", PLEADING)
+        (self.src / "memo.txt").write_text("備忘", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_docx_converted_native_skipped(self):
+        out = self.dir / "md"
+        stats = docs.export_markdown([self.src], out)
+        self.assertEqual((stats["converted"], stats["skipped_native"]), (1, 1))
+        md = (out / "起訴狀.md").read_text(encoding="utf-8")
+        self.assertTrue(md.startswith("# 民事起訴狀"))
+        self.assertIn("貳、事實及理由", md)
+
+    def test_split_under_size_limit(self):
+        out = self.dir / "md"
+        docs.export_markdown([self.src / "起訴狀.docx"], out, max_bytes=300)
+        parts = sorted(out.glob("起訴狀.part*.md"))
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(p.read_bytes()) <= 300 for p in parts))
+        joined = "".join(p.read_text(encoding="utf-8") for p in parts)
+        self.assertIn("原證二：存證信函影本", joined)
+
+    def test_scanned_pdf_marked(self):
+        mu = docs._pymupdf()
+        if mu is None:
+            self.skipTest("PyMuPDF 未安裝")
+        doc = mu.open()
+        doc.new_page().insert_text((72, 72), "本件爭點為消滅時效是否完成之問題，被告抗辯請求權已罹於時效。",
+                                   fontname="china-t", fontsize=12)
+        doc.new_page()
+        doc.save(str(self.src / "卷證.pdf"))
+        doc.close()
+        text_only = mu.open()
+        text_only.new_page().insert_text((72, 72), "純文字頁面，內容足夠長，不需要任何 OCR 處理。",
+                                         fontname="china-t", fontsize=12)
+        text_only.save(str(self.src / "文字.pdf"))
+        text_only.close()
+        out = self.dir / "md"
+        stats = docs.export_markdown([self.src], out, ocr=False)
+        self.assertFalse((out / "文字.md").exists())  # 文字型 PDF 可直接上傳
+        md = (out / "卷證.md").read_text(encoding="utf-8")
+        self.assertIn("## 第 1 頁", md)
+        self.assertIn("未能辨識文字", md)
+        self.assertEqual(list(stats["needs_ocr"].values()), [[2]])
+
+
 class SftTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

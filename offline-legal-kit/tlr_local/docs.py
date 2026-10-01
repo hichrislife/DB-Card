@@ -292,3 +292,70 @@ def search_docs(conn: sqlite3.Connection, query: str, n: int = 5) -> list[dict]:
         out.append({"title": row["title"], "path": row["path"], "page": row["page"],
                     "excerpt": row["text"][start:start + 240].replace("\n", " ")})
     return out
+
+
+# ── 轉成 DeepSafe 知識庫可上傳的 Markdown ─────────────────────────────
+
+DEEPSAFE_MAX_BYTES = 15 * 1024 * 1024
+# DeepSafe 知識庫可直接收的格式；其中 PDF 若含掃描頁仍需轉換。
+DEEPSAFE_NATIVE = (".txt", ".md")
+
+
+def _safe_stem(path: Path) -> str:
+    return re.sub(r"[^\w.-]+", "_", path.stem)[:80] or "document"
+
+
+def export_markdown(paths: list[Path], out_dir: Path, *, ocr: bool = True,
+                    max_bytes: int = DEEPSAFE_MAX_BYTES, convert_all: bool = False) -> dict:
+    """把 .docx / .doc / 掃描 PDF 轉成 Markdown，每檔不超過 max_bytes，超過就切成多份。
+
+    純文字型 PDF 與 .txt/.md 預設略過（DeepSafe 可直接上傳）；convert_all=True 時一律轉換。
+    含沒有 OCR 成功的掃描頁時，Markdown 內會標註該頁內容缺漏。
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stats = {"converted": 0, "parts": 0, "skipped_native": 0, "failed": 0, "needs_ocr": {}}
+    for f in iter_files(paths):
+        suffix = f.suffix.lower()
+        if not convert_all and suffix in DEEPSAFE_NATIVE:
+            stats["skipped_native"] += 1
+            continue
+        try:
+            ex = extract(f, ocr=ocr)
+        except Exception as exc:
+            stats["failed"] += 1
+            print(f"略過 {f}：{exc}", file=sys.stderr)
+            continue
+        if (not convert_all and suffix == ".pdf" and not ex.ocr_pages and not ex.needs_ocr_pages
+                and f.stat().st_size <= max_bytes):
+            stats["skipped_native"] += 1
+            continue
+        if ex.needs_ocr_pages:
+            stats["needs_ocr"][str(f)] = ex.needs_ocr_pages
+        blocks = [f"# {_title(f, ex)}\n\n來源檔案：{f.name}\n"]
+        for page, text in ex.pages:
+            head = f"\n## 第 {page} 頁\n\n" if page else "\n"
+            if page in ex.needs_ocr_pages:
+                text = "（本頁為掃描影像，未能辨識文字，請人工補登。）"
+            elif page in ex.ocr_pages:
+                head += "（本頁文字為 OCR 辨識結果，可能有錯字。）\n\n"
+            blocks.append(head + text.strip() + "\n")
+        parts: list[str] = []
+        buf = ""
+        for block in blocks:
+            if buf and len((buf + block).encode("utf-8")) > max_bytes:
+                parts.append(buf)
+                buf = ""
+            while len(block.encode("utf-8")) > max_bytes:  # 單頁本身過大時硬切
+                cut = max_bytes // 4  # UTF-8 中文每字 3 bytes，保守切
+                parts.append(block[:cut])
+                block = block[cut:]
+            buf += block
+        if buf:
+            parts.append(buf)
+        stem = _safe_stem(f)
+        for i, part in enumerate(parts, start=1):
+            name = f"{stem}.md" if len(parts) == 1 else f"{stem}.part{i:02d}.md"
+            (out_dir / name).write_text(part, encoding="utf-8")
+        stats["converted"] += 1
+        stats["parts"] += len(parts)
+    return stats

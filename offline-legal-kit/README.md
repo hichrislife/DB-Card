@@ -119,6 +119,24 @@ VRAM 不夠時調大 `CPU_MOE`，或把 `CTX` 從 32768 降到 16384。`--jinja`
 
 本機模型的撰狀品質明顯低於雲端大型模型。產出一律要經過 `check.py` 驗證，並由律師逐條核對。
 
+### 與 DeepSafe 共用模型：只跑一個 LLM 服務
+
+依 DeepSafe 官方頁面，它的離線 AI 是透過 **Ollama** 整合的。如果同時跑 Ollama 和 `start-llm.sh` 的 llama-server，兩邊會各載入一份模型。Edge 3 的 16GB VRAM 和 64GB 記憶體裝不下兩份，所以**只能選一個**：
+
+| 做法 | 優點 | 缺點 |
+|---|---|---|
+| **統一用 Ollama（建議）** | DeepSafe 原生支援；Agent 可以改連 Ollama 的 OpenAI 相容端點 `http://127.0.0.1:11434/v1` | MoE 權重放記憶體的控制方式比 llama-server 少，請確認所用版本支援的參數 |
+| 統一用 llama-server | 可以精確控制 `--n-cpu-moe`，速度與 VRAM 最好掌握 | 要確認 DeepSafe 能不能改接 OpenAI 相容 API |
+
+Ollama 在 Edge 3 上建議的設定（已寫進 `profiles/edge3.env`）：
+- `OLLAMA_HOST=127.0.0.1:11434`：只接受本機連線。
+- `OLLAMA_MAX_LOADED_MODELS=1`：同一時間只載入一個模型。
+- `OLLAMA_NUM_PARALLEL=1`：一次只處理一個請求。
+- `OLLAMA_KEEP_ALIVE=10m`：閒置 10 分鐘就釋放 VRAM，夜間訓練前不必手動停服務。
+- `OLLAMA_FLASH_ATTENTION=1` 和 `OLLAMA_KV_CACHE_TYPE=q8_0`：節省 KV cache 用量。
+
+改用 Ollama 時，「建議排程」裡的 `pkill llama-server` 可以省略；設好 `OLLAMA_KEEP_ALIVE` 後，模型閒置就會自動釋放。
+
 ---
 
 ## 四、匯出 DeepForge 訓練語料
@@ -146,6 +164,9 @@ export TLR_DOCS_ROOT=/data/teams
 python -m tlr_local docs-ingest --team 訴訟一組 /nas/訴訟一組/案卷/
 python -m tlr_local docs-search --team 訴訟一組 "解除契約 返還價金"
 
+# Word、掃描 PDF → DeepSafe 知識庫可上傳的 Markdown（每檔 ≤15MB，超過自動切檔）
+python -m tlr_local docs-to-md /nas/訴訟一組/案卷/ --out /data/deepsafe-upload/訴訟一組/
+
 # 書狀 → 寫作風格訓練樣本（chat JSONL），另自動切出 10% 驗收集
 python -m tlr_local export-sft --team 訴訟一組 /nas/訴訟一組/歷年書狀/ --out /data/train/訴訟一組.jsonl
 ```
@@ -154,6 +175,15 @@ python -m tlr_local export-sft --team 訴訟一組 /nas/訴訟一組/歷年書�
 - `.docx`、`.txt`、`.md` 只用標準函式庫讀取；文字檔支援 UTF-8 和 Big5（cp950）。
 - `.pdf` 需要 `pip install pymupdf`，或系統裝有 poppler 的 `pdftotext`。
 - `.doc` 需要 LibreOffice（`soffice`）先轉成 `.docx`。
+
+**上傳到 DeepSafe 知識庫**
+- DeepSafe 知識庫只接受 txt、md、csv、json、log、pdf，每檔上限 15MB，**不收 Word**。官方頁面也沒有寫明是否會對掃描 PDF 做 OCR。
+- `docs-to-md` 會把下列檔案轉成 Markdown，每頁標上頁碼：
+  - `.docx` 和 `.doc`
+  - 含掃描頁的 PDF
+  - 超過 15MB 的檔案
+- DeepSafe 可以直接收的檔案（txt、md、純文字型 PDF）預設會略過；加上 `--all` 就一律轉換。
+- OCR 失敗的頁面會在 Markdown 裡標註「未能辨識文字」，不會靜靜消失。
 
 **掃描檔**
 - PDF 中沒有文字層的頁面，在系統裝有 `tesseract` 和繁中語言包（`chi_tra`）時會自動 OCR。

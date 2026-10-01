@@ -60,6 +60,12 @@ def main(argv: list[str] | None = None) -> int:
     ds.add_argument("query")
     ds.add_argument("-n", type=int, default=5)
 
+    dm = sub.add_parser("docs-to-md", help="Word / 掃描 PDF 轉成 DeepSafe 知識庫可上傳的 Markdown（每檔 ≤15MB）")
+    dm.add_argument("paths", nargs="+", type=Path)
+    dm.add_argument("--out", type=Path, required=True)
+    dm.add_argument("--no-ocr", action="store_true")
+    dm.add_argument("--all", action="store_true", help="連 DeepSafe 可直接收的 txt/md/文字型 PDF 也轉")
+
     sf = sub.add_parser("export-sft", help="把團隊過去的書狀轉成寫作風格訓練樣本（chat JSONL）")
     sf.add_argument("--team", required=True)
     sf.add_argument("paths", nargs="+", type=Path)
@@ -80,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
             page = f" 第{hit['page']}頁" if hit["page"] else ""
             print(f"[{i}] {hit['title']}{page}\n    {hit['path']}\n    {hit['excerpt']}")
         return 0
+    if a.cmd == "docs-to-md":
+        stats = docs.export_markdown(a.paths, a.out, ocr=not a.no_ocr, convert_all=a.all)
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+        return 1 if stats["failed"] else 0
     if a.cmd == "export-sft":
         stats = sft.export_sft(a.paths, a.out, team=a.team, scrub_pii=not a.no_scrub, holdout=a.holdout)
         print(json.dumps(stats, ensure_ascii=False, indent=2))

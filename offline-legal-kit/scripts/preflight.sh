@@ -58,6 +58,10 @@ if command -v llama-server >/dev/null 2>&1; then
   if llama-server --help 2>&1 | grep -q -- '--n-cpu-moe'; then ok "llama-server（支援 --n-cpu-moe）"
   else fail "llama-server 版本過舊，不支援 --n-cpu-moe"; fi
 else warn "找不到 llama-server（本機 LLM）"; fi
+command -v ollama >/dev/null 2>&1 && ok "ollama（DeepSafe 離線 AI）" || warn "找不到 ollama（DeepSafe 的離線 AI 透過 Ollama）"
+if pgrep -x ollama >/dev/null 2>&1 && pgrep -x llama-server >/dev/null 2>&1; then
+  fail "ollama 與 llama-server 同時執行，會各載一份模型；16GB VRAM / 64GB 記憶體放不下，請只留一個"
+fi
 
 echo "== 離線設定"
 if command -v twlegalrag >/dev/null 2>&1; then
