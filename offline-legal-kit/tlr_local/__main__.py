@@ -7,9 +7,10 @@ import json
 import os
 from pathlib import Path
 
-from . import db, export, ingest, server
+from . import db, docs, export, ingest, server, sft
 
 DEFAULT_DB = os.environ.get("TLR_LOCAL_DB", "tlr_local.sqlite")
+DEFAULT_DOCS_ROOT = os.environ.get("TLR_DOCS_ROOT", "teams")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,9 +45,44 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("stats", help="顯示資料庫筆數")
 
+    def team_args(sp):
+        sp.add_argument("--team", required=True, help="團隊代號；每個團隊一個獨立資料庫檔")
+        sp.add_argument("--docs-root", default=DEFAULT_DOCS_ROOT,
+                        help=f"團隊資料庫目錄（預設 {DEFAULT_DOCS_ROOT}，或設 TLR_DOCS_ROOT）")
+
+    di = sub.add_parser("docs-ingest", help="匯入使用者自備文件（PDF / Word / 文字檔，掃描檔會做 OCR）")
+    team_args(di)
+    di.add_argument("paths", nargs="+", type=Path)
+    di.add_argument("--no-ocr", action="store_true", help="不做 OCR，只列出需要 OCR 的頁面")
+
+    ds = sub.add_parser("docs-search", help="在單一團隊的文件中檢索")
+    team_args(ds)
+    ds.add_argument("query")
+    ds.add_argument("-n", type=int, default=5)
+
+    sf = sub.add_parser("export-sft", help="把團隊過去的書狀轉成寫作風格訓練樣本（chat JSONL）")
+    sf.add_argument("--team", required=True)
+    sf.add_argument("paths", nargs="+", type=Path)
+    sf.add_argument("--out", type=Path, required=True)
+    sf.add_argument("--holdout", type=float, default=0.1, help="依檔名固定切出的驗收比例")
+    sf.add_argument("--no-scrub", action="store_true", help="不遮蔽個資（僅限團隊內部使用的 adapter）")
+
     a = p.parse_args(argv)
     if a.cmd == "serve":
         server.serve(a.db, a.host, a.port)
+        return 0
+    if a.cmd == "docs-ingest":
+        stats = docs.ingest_docs(docs.connect_team(a.docs_root, a.team), a.paths, ocr=not a.no_ocr)
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+        return 1 if stats["failed"] else 0
+    if a.cmd == "docs-search":
+        for i, hit in enumerate(docs.search_docs(docs.connect_team(a.docs_root, a.team), a.query, a.n), 1):
+            page = f" 第{hit['page']}頁" if hit["page"] else ""
+            print(f"[{i}] {hit['title']}{page}\n    {hit['path']}\n    {hit['excerpt']}")
+        return 0
+    if a.cmd == "export-sft":
+        stats = sft.export_sft(a.paths, a.out, team=a.team, scrub_pii=not a.no_scrub, holdout=a.holdout)
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
         return 0
     conn = db.connect(a.db)
     if a.cmd == "ingest-judgments":

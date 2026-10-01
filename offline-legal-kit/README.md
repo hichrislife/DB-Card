@@ -96,7 +96,47 @@ python -m tlr_local export-training /data/train/supreme.jsonl --court 最高法�
 
 ---
 
-## 五、授權與資料來源
+## 五、使用者自備文件（按團隊分開）
+
+每個團隊一個獨立的 SQLite 檔（`<docs-root>/<團隊>.sqlite`），團隊之間在檔案層級就分開。要刪除某個團隊的資料，刪掉該檔案即可。
+
+```bash
+export TLR_DOCS_ROOT=/data/teams
+
+# 匯入：資料夾內的 .pdf / .docx / .doc / .txt / .md，未變動的檔案會自動略過
+python -m tlr_local docs-ingest --team 訴訟一組 /nas/訴訟一組/案卷/
+python -m tlr_local docs-search --team 訴訟一組 "解除契約 返還價金"
+
+# 書狀 → 寫作風格訓練樣本（chat JSONL），另自動切出 10% 驗收集
+python -m tlr_local export-sft --team 訴訟一組 /nas/訴訟一組/歷年書狀/ --out /data/train/訴訟一組.jsonl
+```
+
+**文件格式**
+- `.docx`、`.txt`、`.md` 只用標準函式庫讀取；文字檔支援 UTF-8 和 Big5（cp950）。
+- `.pdf` 需要 `pip install pymupdf`，或系統裝有 poppler 的 `pdftotext`。
+- `.doc` 需要 LibreOffice（`soffice`）先轉成 `.docx`。
+
+**掃描檔**
+- PDF 中沒有文字層的頁面，在系統裝有 `tesseract` 和繁中語言包（`chi_tra`）時會自動 OCR。
+- 沒有 tesseract 時，這些頁面會列在匯入結果的 `needs_ocr` 欄位，不會默默漏掉。
+- OCR 的錯字會被模型學進去，掃描檔進訓練前請先抽查。
+
+**訓練樣本的切法**
+- 依「壹、貳、參」→「一、二、三」→ Word 標題樣式的順序，找出能切出兩段以上的層級。
+- 每一段產生一筆樣本：
+  - 使用者訊息：書狀類型、前文摘錄（600 字）、要撰寫的段落標題
+  - 助理訊息：該段內文
+- 這是在學「寫法」，不是讓模型記住案情。要查詢內容請用 `docs-search`。
+- 預設遮蔽個資。只在團隊內部使用的 adapter 可以加 `--no-scrub`。
+- 輸出是常見的 `messages` 格式。DeepForge 實際要哪種格式，請以它的文件為準。
+
+**權限**
+- `docs-search` 目前只有 CLI，沒有 HTTP 介面，避免任何人只要改一個團隊參數就能讀到別組資料。
+- 如果要做成網頁服務，請先加上登入與團隊權限控管。
+
+---
+
+## 六、授權與資料來源
 
 - **只能用自行下載的公開資料訓練。** tw-legal-rag 的服務條款（TERMS.md）禁止把 `tlr.dr-legal.com.tw` 回傳的內容拿來訓練或微調模型，也禁止大量匯出它的資料庫。`tlr_local` 完全不連該服務。
 - **Legal-Pleading-Suite** 採 CC BY-NC-SA 4.0 授權，另附豁免條款。要整合進收費產品，須先取得作者的書面授權。
@@ -104,7 +144,7 @@ python -m tlr_local export-training /data/train/supreme.jsonl --court 最高法�
 
 ---
 
-## 六、限制
+## 七、限制
 
 - **排序方式**：使用 BM25 關鍵字排序（中文以兩字一組切詞），沒有語意向量檢索。查詢請用具體法律用語，例如「違約金 過高 酌減」，不要用口語描述。
 - **單字詞查不到**：單一個中文字無法當作查詢詞，至少要兩個字。
