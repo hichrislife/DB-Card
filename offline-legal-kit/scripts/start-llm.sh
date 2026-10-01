@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 本機 LLM（llama.cpp llama-server），給 RTX 5070 Ti 16GB 與 DeepForge 共用一張卡。
 #
-# 做法：MoE 模型的 expert 權重放系統記憶體（128GB），GPU 只放注意力層與 KV cache，
-# 大約佔 3–6GB VRAM，其餘留給 DeepForge 訓練。
+# 做法：MoE 模型的 expert 權重放系統記憶體（30B Q4 約 18–19GB，Edge 3 的 64GB 放得下），
+# GPU 只放注意力層與 KV cache，大約佔 4–6GB VRAM，其餘留給 DeepForge 訓練。
+# 搭配配置檔：set -a; source profiles/edge3.env; set +a
 #
 # 用法：MODEL=/models/xxx.gguf ./scripts/start-llm.sh
 # 可調參數（環境變數）：

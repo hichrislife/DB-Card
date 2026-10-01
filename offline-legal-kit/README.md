@@ -1,6 +1,6 @@
 # 離線法律工作站套件（offline-legal-kit）
 
-讓 [Legal-Pleading-Suite](https://github.com/lexchang53/Legal-Pleading-Suite) 在**完全離線**的單機上運作，並與 DeepForge（訓練）、DeepSafe（安全）共用一張 RTX 5070 Ti（16GB）。
+讓 [Legal-Pleading-Suite](https://github.com/lexchang53/Legal-Pleading-Suite) 在**完全離線**的單機上運作，並與 DeepForge（訓練）、DeepSafe（安全）共用同一台 Edge 3（RTX 5070 Ti 16GB、64GB 記憶體）。
 
 原本的套件有兩處需要連網：
 
@@ -15,19 +15,58 @@ Legal-Pleading-Suite 和 twlegalrag **一行都不用改**。twlegalrag 本來�
 
 ---
 
-## 一、GPU 分配（RTX 5070 Ti 16GB）
+## 一、Edge 3 標準配置（i7-13700E、64GB、RTX 5070 Ti 16GB）
 
-| 項目 | VRAM | 說明 |
+設定值集中在 `profiles/edge3.env`。部署後先跑一次檢查：
+
+```bash
+./scripts/preflight.sh profiles/edge3.env
+```
+
+它會檢查顯卡和 VRAM、功耗上限、記憶體、swap、磁碟空間，以及 PDF、OCR、LLM 等工具，並確認 twlegalrag 是否確實指向本機。
+
+### VRAM（16GB）
+
+| 項目 | 白天（推論） | 夜間（訓練） |
 |---|---|---|
-| 螢幕輸出 | 0 | 接主機板內顯 |
-| `tlr_local` 檢索 | 0 | SQLite 全文檢索，純 CPU |
-| DeepSafe 規則式個資遮蔽（`tlr_local/pii.py`） | 0 | 純 CPU |
-| 本機 LLM（30B 級 MoE，expert 放系統記憶體） | 約 3–6GB | `CPU_MOE` 越大越省 |
-| DeepForge 訓練（8B QLoRA） | 約 9–11GB | 見下方建議設定 |
+| 螢幕輸出（接內顯） | 0 | 0 |
+| `tlr_local` 檢索、規則式個資遮蔽 | 0 | 0 |
+| 本機 LLM（30B 級 MoE，expert 放記憶體） | 約 4–6GB | 建議停止 |
+| DeepForge 訓練（8B QLoRA） | — | 約 9–11GB |
+| DeepSafe 的 GPU 模型（實際用量待確認） | 預留 2–4GB | 預留 2–4GB |
+| 安全餘裕 | 6GB 以上 | 1–3GB |
 
-VRAM 數字為估計值，實際以 `watch -n 1 nvidia-smi` 為準。DeepSafe 若另有 GPU 模型，須再扣除它的用量。
+### 系統記憶體（64GB）
 
-DeepForge 建議設定：4-bit QLoRA、gradient checkpointing、batch 1 搭配 gradient accumulation、paged AdamW 8-bit，序列長度 2048–4096；啟動前設 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`。
+| 項目 | 用量 |
+|---|---|
+| 作業系統 | 約 4GB |
+| LLM 的 MoE expert 權重（30B Q4） | 約 18–19GB |
+| 載入 8B 原始權重再量化（訓練開始時的瞬間峰值） | 約 8–16GB |
+| `tlr_local`、OCR、文件匯入 | 約 4–8GB |
+| DeepSafe（實際用量待確認） | 預留 4–8GB |
+| 合計 | **約 40–55GB，可同時運作** |
+
+**64GB 的限制：**
+- 訓練 14B 時，光載入原始權重就要約 28GB，再加上 LLM 的 19GB 會太緊。
+- 要訓練 14B，請擇一：
+  - 訓練期間停止 LLM。
+  - 改用已經量化成 4-bit 的基底模型檔，不必先載入原始權重。
+- 32B 以上不在 Edge 3 的範圍。
+
+以上都是估計值，部署後請用 `watch -n 1 nvidia-smi` 和 `free -g` 實測，並把 DeepSafe 實際的用量填回這張表。
+
+### 建議排程
+
+- **白天：** 開 LLM 和檢索服務，GPU 留給推論。
+- **夜間：** 停掉 LLM（`pkill llama-server`），讓出 VRAM 給 DeepForge 訓練。checkpoint 寫到 `TRAIN_CHECKPOINT_DIR`，也就是 NAS 或第二顆 SSD。
+- **功耗：** 用 `sudo nvidia-smi -pl 250` 把上限降到 250W，可降低工業機箱內的溫度。
+
+DeepForge 的起始參數也在 `profiles/edge3.env` 的 `TRAIN_*` 欄位：8B、4-bit QLoRA、序列長度 4096、batch 1、gradient accumulation 16、LoRA r=16、gradient checkpointing、paged AdamW 8-bit。請依 DeepForge 的實際參數名稱對應設定。
+
+### 升級路線
+
+DeepForge 和 DeepSafe 都有 ARM 版，所以可以加一台 GX10 或 DGX Spark（128GB 統一記憶體）負責 32B–70B 的訓練與大模型推論。Edge 3 則繼續擔任前端，負責檢索、DeepSafe 和文件匯入。
 
 ---
 
