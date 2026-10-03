@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	Allgemeinwissen (Beispiel)	other	Beispielfach zum Testen der Pipeline; zählt nicht
+german_civil_law	Bürgerliches Recht	humanities	Staatsexamen-Übungsfälle mit freier Lizenz
+german_history	Deutsche Geschichte	humanities	Abitur (Lizenz je Bundesland prüfen)
+geography	Geographie	social_sciences	Abitur (Lizenz je Bundesland prüfen)
+chemistry	Chemie	STEM	Abitur (Lizenz je Bundesland prüfen)
+pharmacy	Pharmazie	other	Pharmazeutische Prüfung (IMPP, Lizenz prüfen)

@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	一般常識（サンプル）	other	サンプル科目。パイプライン確認用、ランキング対象外
+civil_law	民法	humanities	司法試験 短答式 / 行政書士試験
+japanese_history	日本史	humanities	大学入学共通テスト 日本史B
+japanese_geography	地理	social_sciences	大学入学共通テスト 地理B
+chemistry	化学	STEM	大学入学共通テスト 化学
+pharmacy	薬学	other	薬剤師国家試験

@@ -1,0 +1,12 @@
+lang: ko
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "다음은 {subject}에 관한 시험의 선다형 문제입니다. 정답을 하나 고르세요."
+choice_format: "{letter}. {text}"
+answer_prefix: "정답:"
+fewshot_separator: "\n\n"
+cot_suffix: "단계별로 생각한 뒤 마지막에 \"정답은 X\" 형식으로 답하세요."
+answer_regexes:
+  - "정답[은는]\\s*\\(?([A-H])"
+  - "답[은는]\\s*\\(?([A-H])"
+  - "따라서\\s*\\(?([A-H])"
+  - "선택지\\s*\\(?([A-H])\\)?\\s*[이가]\\s*옳"

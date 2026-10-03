@@ -1,0 +1,12 @@
+lang: en
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "The following are multiple choice questions (with answers) about {subject}."
+choice_format: "{letter}. {text}"
+answer_prefix: "Answer:"
+fewshot_separator: "\n\n"
+cot_suffix: "Think step by step, then finish with \"The answer is X\"."
+answer_regexes:
+  - "[Tt]he (?:correct )?answer is\\s*\\(?([A-H])"
+  - "[Aa]nswer:\\s*\\(?([A-H])"
+  - "[Oo]ption\\s*\\(?([A-H])\\)?\\s*is correct"
+  - "[Tt]herefore,?\\s*\\(?([A-H])"

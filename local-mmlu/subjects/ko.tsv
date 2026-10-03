@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	일반 상식(샘플)	other	샘플 과목. 파이프라인 확인용, 순위표 미반영
+korean_history	한국사	humanities	한국사능력검정시험 (저작권 확인 필수)
+civil_law	민법	humanities	공무원 시험 / 법무사 시험
+korean_geography	한국지리	social_sciences	수능 사회탐구 (KICE 저작권 확인 필수)
+chemistry	화학	STEM	수능 과학탐구 (KICE 저작권 확인 필수)
+nursing	간호학	other	간호사 국가시험

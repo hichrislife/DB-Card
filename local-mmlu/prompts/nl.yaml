@@ -1,0 +1,12 @@
+lang: nl
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "Hieronder staan meerkeuzevragen (met antwoorden) over {subject}."
+choice_format: "{letter}. {text}"
+answer_prefix: "Antwoord:"
+fewshot_separator: "\n\n"
+cot_suffix: "Denk stap voor stap en eindig met \"Het antwoord is X\"."
+answer_regexes:
+  - "[Hh]et (?:juiste )?antwoord is\\s*\\(?([A-H])"
+  - "[Aa]ntwoord:\\s*\\(?([A-H])"
+  - "[Oo]ptie\\s*\\(?([A-H])\\)?\\s*is (?:juist|correct)"
+  - "[Dd]us\\s*\\(?([A-H])"

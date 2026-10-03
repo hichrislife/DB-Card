@@ -1,0 +1,32 @@
+name: validate
+on:
+  push:
+  pull_request:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Validate data
+        run: python tools/validate.py
+      - name: Unit tests
+        run: pytest -q tests/
+      - name: Build Hub layout and lm-eval tasks (smoke test)
+        run: |
+          python tools/build_hf.py --out out/hf --include-samples
+          python lm_eval/generate_tasks.py --local out/hf --include-samples
+  release-gate:
+    # Only on the release branch: sizes and reviewer counts become hard errors.
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python tools/validate.py --strict

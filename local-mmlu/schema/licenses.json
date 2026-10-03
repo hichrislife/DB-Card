@@ -1,0 +1,21 @@
+{
+  "_comment": "Licenses a question may carry. 'commercial_ok' licenses may live anywhere under data/. Non-commercial licenses are only accepted under the directories listed in 'noncommercial_dirs' so the main corpus stays commercially usable.",
+  "commercial_ok": [
+    "CC0-1.0",
+    "CC-BY-4.0",
+    "CC-BY-SA-4.0",
+    "public-domain",
+    "government-work"
+  ],
+  "noncommercial": [
+    "CC-BY-NC-4.0",
+    "CC-BY-NC-SA-4.0"
+  ],
+  "noncommercial_dirs": [
+    "data/zh-TW/_derived_tmmluplus"
+  ],
+  "notes": {
+    "government-work": "Use only when the issuing country's copyright law exempts official exam papers (e.g. Taiwan Copyright Act art. 9 for state exams). Record the legal basis in data/{lang}/LICENSES.md.",
+    "public-domain": "Use only when the copyright term has expired or the author waived rights in writing."
+  }
+}

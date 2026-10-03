@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	Cultura generale (esempio)	other	Materia di esempio per testare la pipeline; esclusa dalle classifiche
+italian_civil_law	Diritto civile	humanities	Esame di avvocato / concorsi pubblici (verificare licenza)
+italian_history	Storia d'Italia	humanities	Maturità (verificare licenza MIM)
+geography	Geografia	social_sciences	Concorsi pubblici, banche dati ufficiali
+chemistry	Chimica	STEM	Test di ammissione (verificare licenza)
+nursing	Infermieristica	other	Test di ammissione professioni sanitarie

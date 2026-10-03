@@ -1,0 +1,12 @@
+lang: ja
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "以下は{subject}に関する試験の多肢選択問題です。正しい答えを一つ選んでください。"
+choice_format: "{letter}. {text}"
+answer_prefix: "答え："
+fewshot_separator: "\n\n"
+cot_suffix: "段階的に考え、最後に「答えは X」の形式で締めてください。"
+answer_regexes:
+  - "答え[はが]\\s*[（(]?([A-H])"
+  - "正解[はが]\\s*[（(]?([A-H])"
+  - "したがって[、,]?\\s*[（(]?([A-H])"
+  - "選択肢\\s*[（(]?([A-H])[）)]?\\s*が正しい"

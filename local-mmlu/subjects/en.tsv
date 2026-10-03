@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	General knowledge (sample)	other	Sample subject for pipeline testing; excluded from leaderboards
+us_constitutional_law	US constitutional law	humanities	Bar exam practice sets with permissive licences only
+uk_history	UK history	humanities	GCSE/A-level past papers (check exam-board licence)
+geography	Geography	social_sciences	GCSE/A-level past papers (check exam-board licence)
+chemistry	Chemistry	STEM	Open-licensed university problem sets
+nursing	Nursing	other	NCLEX-style open question banks
