@@ -1,0 +1,14 @@
+# Prompt template for Traditional Chinese (Taiwan). Mirrors the original TMMLU+/ievals wording.
+lang: zh-TW
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "以下是關於{subject}考試單選題，請選出正確的答案。"
+choice_format: "{letter}. {text}"          # one choice per line
+answer_prefix: "答案："
+fewshot_separator: "\n\n"
+cot_suffix: "請逐步思考，最後以「答案為 X」結尾。"
+# Regexes used to pull the final letter out of a free-form (CoT) answer. First match wins.
+answer_regexes:
+  - "答案[為是]\\s*[（(]?([A-H])"
+  - "選項\\s*[（(]?([A-H])[）)]?\\s*是正確的"
+  - "因此[，,]\\s*選項\\s*[（(]?([A-H])"
+  - "正確答案[為是]\\s*[（(]?([A-H])"

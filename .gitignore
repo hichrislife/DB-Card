@@ -1,0 +1,5 @@
+out/
+lm_eval/tasks/
+__pycache__/
+.pytest_cache/
+*.pyc

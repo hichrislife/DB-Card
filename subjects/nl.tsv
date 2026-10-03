@@ -1,0 +1,7 @@
+subject	name	category	source_hint
+sample_general_knowledge	Algemene kennis (voorbeeld)	other	Voorbeeldvak voor het testen van de pipeline; telt niet mee
+dutch_law	Nederlands recht	humanities	Staatsexamen / open rechtenbanken
+dutch_history	Nederlandse geschiedenis	humanities	CvTE eindexamens (licentie controleren)
+geography	Aardrijkskunde	social_sciences	CvTE eindexamens (licentie controleren)
+chemistry	Scheikunde	STEM	CvTE eindexamens (licentie controleren)
+nursing	Verpleegkunde	other	Open toetsbanken MBO/HBO

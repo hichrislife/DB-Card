@@ -1,0 +1,2 @@
+lang,country,subject,category,question,choice_a,choice_b,choice_c,choice_d,choice_e,answer,explanation,source,source_url,year,license,difficulty,contributed_by
+ja,JP,civil_law,humanities,"問題文をここに",選択肢A,選択肢B,選択肢C,選択肢D,,B,"任意の解説","司法試験 2022 短答式",https://www.moj.go.jp/,2022,government-work,professional,your-github-handle

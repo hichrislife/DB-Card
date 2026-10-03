@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/local-mmlu/question.schema.json",
+  "title": "Local-MMLU question",
+  "description": "One multiple-choice question. One JSON object per line in data/{lang}/{subject}/{split}.jsonl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "lang", "country", "subject", "category", "question", "choices", "answer_index", "source", "license"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?-[a-z0-9_]+-[0-9]{5}$",
+      "description": "Globally unique. Format: {lang}-{subject}-{5 digit sequence}, e.g. ja-civil_law-00123"
+    },
+    "lang": {
+      "type": "string",
+      "enum": ["zh-TW", "ja", "ko", "en", "nl", "de", "it"],
+      "description": "BCP-47 language tag. Must match the data/{lang} directory."
+    },
+    "country": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "description": "ISO 3166-1 alpha-2 of the jurisdiction the exam belongs to (TW, JP, KR, US, GB, NL, DE, IT, ...)."
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "snake_case subject key. Must match the data/{lang}/{subject} directory and a row in subjects/{lang}.tsv."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["STEM", "humanities", "social_sciences", "other"],
+      "description": "Top-level grouping, same four groups TMMLU+/MMLU use."
+    },
+    "question": {"type": "string", "minLength": 1},
+    "choices": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1},
+      "description": "Variable length. Rendered as A, B, C, ... by the evaluator."
+    },
+    "answer_index": {"type": "integer", "minimum": 0, "maximum": 7, "description": "0-based index into choices."},
+    "explanation": {"type": ["string", "null"], "description": "Optional rationale. Never shown to the model at test time."},
+    "source": {"type": "string", "minLength": 1, "description": "Human-readable exam name and session, e.g. '司法試験 2022 短答式'."},
+    "source_url": {"type": ["string", "null"], "format": "uri"},
+    "year": {"type": ["integer", "null"], "minimum": 1950, "maximum": 2100},
+    "license": {
+      "type": "string",
+      "description": "SPDX-style identifier. Must appear in schema/licenses.json."
+    },
+    "difficulty": {"type": ["string", "null"], "enum": ["junior", "senior", "undergraduate", "professional", null]},
+    "contributed_by": {"type": ["string", "null"], "description": "GitHub handle or pseudonym of the contributor."},
+    "reviewed_by": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true,
+      "default": [],
+      "description": "Reviewers who approved the item. Strict mode requires >= 2 for the test split."
+    },
+    "tags": {"type": "array", "items": {"type": "string"}, "default": []}
+  }
+}

@@ -1,0 +1,12 @@
+lang: de
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "Im Folgenden finden Sie Multiple-Choice-Fragen (mit Antworten) zum Thema {subject}."
+choice_format: "{letter}. {text}"
+answer_prefix: "Antwort:"
+fewshot_separator: "\n\n"
+cot_suffix: "Denken Sie Schritt für Schritt und schließen Sie mit \"Die Antwort ist X\" ab."
+answer_regexes:
+  - "[Dd]ie (?:richtige )?Antwort (?:ist|lautet)\\s*\\(?([A-H])"
+  - "[Aa]ntwort:\\s*\\(?([A-H])"
+  - "[Oo]ption\\s*\\(?([A-H])\\)?\\s*ist (?:richtig|korrekt)"
+  - "[Dd]aher\\s*\\(?([A-H])"

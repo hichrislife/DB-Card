@@ -1,0 +1,12 @@
+lang: it
+letters: ["A", "B", "C", "D", "E", "F", "G", "H"]
+instruction: "Le seguenti sono domande a scelta multipla (con risposte) su {subject}."
+choice_format: "{letter}. {text}"
+answer_prefix: "Risposta:"
+fewshot_separator: "\n\n"
+cot_suffix: "Ragiona passo dopo passo e concludi con \"La risposta è X\"."
+answer_regexes:
+  - "[Ll]a risposta (?:corretta |giusta )?è\\s*\\(?([A-H])"
+  - "[Rr]isposta:\\s*\\(?([A-H])"
+  - "[Ll]'opzione\\s*\\(?([A-H])\\)?\\s*è (?:corretta|giusta)"
+  - "[Qq]uindi\\s*\\(?([A-H])"
