@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# whale-vpn-session-log：每分鐘由 systemd timer 執行，記錄每個 peer 的 VPN 連線起訖。
+# 寫入 sessions.log：
+#   SESSION-START / ENDPOINT-CHANGE / SESSION-END type= name= ip= endpoint=
+# 判斷方式：最近一次 handshake 在 GAP 秒內就算「在線」（WireGuard 在有流量時約每 2 分鐘 handshake，
+# 機器端有 keepalive 所以會一直在線）。
+# 哪位工程師對哪台機器開了 SSH，看 ssh-connections.log（由 nftables 逐筆記錄）。
+set -euo pipefail
+
+WG_IF="${WHALE_VPN_IF:-wg0}"
+STATE_DIR="${WHALE_VPN_STATE_DIR:-/var/lib/whale-vpn}"
+LOG_DIR="${WHALE_VPN_LOG_DIR:-/var/log/whale-vpn}"
+GAP="${WHALE_VPN_SESSION_GAP:-300}"
+REGISTRY="$STATE_DIR/peers.tsv"
+STATE="$STATE_DIR/session.state"
+LOG="$LOG_DIR/sessions.log"
+
+fmt() { if (($1 > 0)); then date -d "@$1" --iso-8601=seconds; else echo never; fi; }
+log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*" >>"$LOG"; }
+
+dump=$(wg show "$WG_IF" dump 2>/dev/null | tail -n +2) || exit 0
+now=$(date +%s)
+
+declare -A rname rip rtype pep pact seen
+if [[ -f $REGISTRY ]]; then
+	while IFS=$'\t' read -r ip type name pub _; do
+		rname[$pub]=$name rip[$pub]=$ip rtype[$pub]=$type
+	done < <(tail -n +2 "$REGISTRY")
+fi
+if [[ -f $STATE ]]; then
+	while IFS=$'\t' read -r pub _hs ep act; do
+		pep[$pub]=$ep pact[$pub]=$act
+	done <"$STATE"
+fi
+
+who() { echo "type=${rtype[$1]:-unknown} name=${rname[$1]:-unknown} ip=${rip[$1]:-unknown}"; }
+
+new_state=$(mktemp "$STATE_DIR/.session.state.XXXXXX")
+while IFS=$'\t' read -r pub _psk ep _aips hs _rest; do
+	[[ -n $pub ]] || continue
+	seen[$pub]=1
+	was=${pact[$pub]:-0}
+	active=0
+	if ((hs > 0 && now - hs <= GAP)); then active=1; fi
+	if ((active && !was)); then
+		log "SESSION-START $(who "$pub") endpoint=$ep handshake=$(fmt "$hs")"
+	elif ((active)) && [[ $ep != "${pep[$pub]:-}" ]]; then
+		log "ENDPOINT-CHANGE $(who "$pub") endpoint=$ep previous=${pep[$pub]:-}"
+	elif ((!active && was)); then
+		log "SESSION-END $(who "$pub") endpoint=$ep last_handshake=$(fmt "$hs")"
+	fi
+	printf '%s\t%s\t%s\t%s\n' "$pub" "$hs" "$ep" "$active" >>"$new_state"
+done <<<"$dump"
+
+# 在線中被撤銷（已從 wg0 移除）的 peer
+for pub in "${!pact[@]}"; do
+	if [[ ${pact[$pub]} == 1 && -z ${seen[$pub]:-} ]]; then
+		log "SESSION-END $(who "$pub") endpoint=${pep[$pub]:-} reason=peer-removed"
+	fi
+done
+
+mv -f "$new_state" "$STATE"

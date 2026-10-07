@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# whale-vpn-connlog：查「誰在什麼時間連到哪台機器」（含已壓縮的舊紀錄）。
+#
+#   whale-vpn-connlog                      全部
+#   whale-vpn-connlog --since 2026-10-01   某天之後
+#   whale-vpn-connlog <名稱或IP>           只看某位工程師或某台機器
+#
+# 來源是 nftables 對每筆「工程師 → 機器 TCP 22」新連線寫的 ssh-connections.log。
+# IP 不重複使用，所以用登錄簿把 IP 對回名稱是確定的。
+set -euo pipefail
+
+STATE_DIR="${WHALE_VPN_STATE_DIR:-/var/lib/whale-vpn}"
+LOG_DIR="${WHALE_VPN_LOG_DIR:-/var/log/whale-vpn}"
+REGISTRY="$STATE_DIR/peers.tsv"
+
+since="" filter=""
+while (($#)); do
+	case $1 in
+	--since) since="${2:-}"; shift 2 ;;
+	-h | --help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	*) filter="$1"; shift ;;
+	esac
+done
+
+shopt -s nullglob
+# 舊檔（-YYYYMM，可能 .gz）依檔名排序，最後接目前的檔案
+files=("$LOG_DIR"/ssh-connections.log-*)
+[[ -f $LOG_DIR/ssh-connections.log ]] && files+=("$LOG_DIR/ssh-connections.log")
+((${#files[@]})) || { echo "沒有連線紀錄" >&2; exit 0; }
+
+{
+	printf 'TIME\tENGINEER\tENGINEER_IP\tMACHINE\tMACHINE_IP\n'
+	zcat -f -- "${files[@]}" | awk -v reg="$REGISTRY" -v since="$since" -v filter="$filter" -v OFS='\t' '
+		BEGIN {
+			FS = "\t"
+			while ((getline line < reg) > 0) { split(line, f, "\t"); name[f[1]] = f[3] }
+			FS = " "
+		}
+		{
+			if (since != "" && $1 < since) next
+			src = dst = ""
+			for (i = 2; i <= NF; i++) {
+				if ($i ~ /^SRC=/) src = substr($i, 5)
+				else if ($i ~ /^DST=/) dst = substr($i, 5)
+			}
+			if (src == "") next
+			en = (src in name) ? name[src] : "unknown"
+			mn = (dst in name) ? name[dst] : "unknown"
+			if (filter != "" && filter != en && filter != mn && filter != src && filter != dst) next
+			print $1, en, src, mn, dst
+		}'
+} | LC_ALL=C.UTF-8 column -t -s $'\t'

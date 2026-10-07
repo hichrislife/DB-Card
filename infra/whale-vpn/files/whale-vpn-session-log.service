@@ -1,0 +1,7 @@
+[Unit]
+Description=Whale VPN: record peer session start/end
+After=wg-quick@wg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/whale-vpn-session-log

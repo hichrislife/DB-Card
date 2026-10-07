@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+# whale-vpn-peer：加入、撤銷、列出 Whale 遠端維護 VPN 的 peer。
+#
+#   whale-vpn-peer add machine  <名稱> <WireGuard公鑰> --note "客戶機關／序號" [--ip 10.8.0.N]
+#   whale-vpn-peer add engineer <名稱> <WireGuard公鑰> --note "誰的哪台筆電"  [--ip 10.8.1.N]
+#   whale-vpn-peer revoke <名稱|IP|公鑰> --reason "原因"
+#   whale-vpn-peer list [--all]
+#   whale-vpn-peer show-config <名稱>
+#   whale-vpn-peer sync
+#
+# 唯一資料來源是 peers.tsv。wg0.conf 由 wg0.interface + peers.tsv 產生，再以
+# wg syncconf 套用，所以執行中的設定永遠等於登錄簿。IP 一律不重複使用（撤銷後也不回收），
+# 連線紀錄裡的 IP 因此能一對一對回當時的 peer。
+# 每次操作（含被拒絕的）都寫進 peer-admin.log（append-only）與 syslog。
+set -euo pipefail
+umask 077
+
+WG_IF="${WHALE_VPN_IF:-wg0}"
+WG_DIR="${WHALE_VPN_WG_DIR:-/etc/wireguard}"
+STATE_DIR="${WHALE_VPN_STATE_DIR:-/var/lib/whale-vpn}"
+LOG_DIR="${WHALE_VPN_LOG_DIR:-/var/log/whale-vpn}"
+ENDPOINT="${WHALE_VPN_ENDPOINT:-vpn.whaleforensics.com:51820}"
+
+REGISTRY="$STATE_DIR/peers.tsv"
+LOCK_FILE="$STATE_DIR/.peers.lock"
+AUDIT_LOG="$LOG_DIR/peer-admin.log"
+IFACE_CONF="$WG_DIR/$WG_IF.interface"
+WG_CONF="$WG_DIR/$WG_IF.conf"
+SERVER_PUB="$WG_DIR/server.pub"
+HEADER=$'ip\ttype\tname\tpubkey\tstatus\tadded_at\tadded_by\tnote\trevoked_at\trevoked_by\trevoke_reason'
+
+OP="${1:-}"
+ACTOR="${SUDO_USER:-$(id -un)}"
+
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+die() { echo "錯誤：$*" >&2; exit 1; }
+now() { date --iso-8601=seconds; }
+clean() { printf '%s' "$1" | tr '\t\r\n"' '   '"'" | cut -c1-200; }
+
+audit() {
+	local msg="$* by=$ACTOR"
+	printf '%s %s\n' "$(now)" "$msg" >>"$AUDIT_LOG"
+	logger -t whale-vpn-peer -- "$msg" 2>/dev/null || true
+}
+
+# 記錄被拒絕的操作後結束
+reject() {
+	audit "${OP^^}-REJECTED args=\"$(clean "$ARGS")\" reason=\"$(clean "$1")\""
+	die "$1"
+}
+
+valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; }
+# 32 bytes 的 base64：43 個字元 + '='，第 43 個字元的低 2 bit 必須為 0
+valid_pubkey() { [[ $1 =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$ ]]; }
+
+range_for() {
+	case $1 in
+	machine) echo "10.8.0. 2 254" ;;
+	engineer) echo "10.8.1. 1 254" ;;
+	*) return 1 ;;
+	esac
+}
+
+registry_rows() { tail -n +2 "$REGISTRY"; }
+
+lock() {
+	exec 9>"$LOCK_FILE"
+	flock -w 30 9 || die "另一個 whale-vpn-peer 正在執行"
+}
+
+render_and_apply() {
+	[[ -s $IFACE_CONF ]] || die "找不到 $IFACE_CONF（bootstrap.sh 還沒跑？）"
+	local tmp
+	tmp=$(mktemp "$WG_DIR/.$WG_IF.conf.XXXXXX")
+	{
+		echo "# 由 whale-vpn-peer 產生，勿手改。來源：$IFACE_CONF + $REGISTRY"
+		cat "$IFACE_CONF"
+		awk -F'\t' '$5 == "active" {
+			printf "\n[Peer]\n# %s %s（%s 加入，by %s）\nPublicKey = %s\nAllowedIPs = %s/32\n", $2, $3, $6, $7, $4, $1
+		}' < <(registry_rows)
+	} >"$tmp"
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$WG_CONF"
+
+	if [[ ${WHALE_VPN_NO_APPLY:-0} == 1 ]]; then
+		return 0
+	fi
+	if ip link show "$WG_IF" >/dev/null 2>&1; then
+		wg syncconf "$WG_IF" <(wg-quick strip "$WG_IF")
+	else
+		echo "注意：$WG_IF 未啟動，只更新了 $WG_CONF，啟動後生效。" >&2
+	fi
+}
+
+print_engineer_config() { # ip
+	local spub
+	spub=$(cat "$SERVER_PUB" 2>/dev/null || echo "<伺服器公鑰>")
+	cat <<EOF
+[Interface]
+# PrivateKey 由筆電自己產生，從不離開筆電
+PrivateKey = <筆電自己的私鑰>
+Address = $1/32
+
+[Peer]
+# Whale 遠端維護 VPN（$ENDPOINT）
+PublicKey = $spub
+Endpoint = $ENDPOINT
+# 只把機器網段導進 VPN，其餘流量照常走本地網路
+AllowedIPs = 10.8.0.0/24
+PersistentKeepalive = 25
+EOF
+}
+
+print_machine_config() { # ip
+	local spub
+	spub=$(cat "$SERVER_PUB" 2>/dev/null || echo "<伺服器公鑰>")
+	cat <<EOF
+[Interface]
+PrivateKey = <機器自己的私鑰，安裝時產生，不離開機器>
+Address = $1/32
+
+[Peer]
+PublicKey = $spub
+Endpoint = $ENDPOINT
+# 伺服器本身 + 工程師網段（工程師 SSH 進來的封包來源是 10.8.1.x，必須在這裡）
+AllowedIPs = 10.8.0.1/32, 10.8.1.0/24
+# 機器在客戶 NAT 後面，靠 keepalive 讓伺服器隨時連得到
+PersistentKeepalive = 25
+EOF
+}
+
+cmd_add() {
+	local type="${1:-}" name="${2:-}" pub="${3:-}" ip="" note=""
+	shift 3 2>/dev/null || reject "參數不足：add <machine|engineer> <名稱> <公鑰> --note ..."
+	while (($#)); do
+		case $1 in
+		--ip) ip="${2:-}"; shift 2 ;;
+		--note) note="${2:-}"; shift 2 ;;
+		*) reject "不認得的參數：$1" ;;
+		esac
+	done
+
+	local range prefix lo hi
+	range=$(range_for "$type") || reject "類型只能是 machine 或 engineer：$type"
+	read -r prefix lo hi <<<"$range"
+	valid_name "$name" || reject "名稱只能用英數字、. _ -，最長 64 字：$name"
+	valid_pubkey "$pub" || reject "不是合法的 WireGuard 公鑰：$pub"
+	[[ -n $note ]] || reject "必須加 --note（機器寫客戶機關／序號；筆電寫使用者／設備）"
+	note=$(clean "$note")
+
+	lock
+	if [[ -s $SERVER_PUB && $pub == "$(cat "$SERVER_PUB")" ]]; then
+		reject "這是伺服器自己的公鑰"
+	fi
+	if awk -F'\t' -v n="$name" '$5 == "active" && $3 == n { f = 1 } END { exit !f }' < <(registry_rows); then
+		reject "名稱已被使用中的 peer 佔用：$name"
+	fi
+	local existing
+	existing=$(awk -F'\t' -v k="$pub" '$4 == k { print $5 " " $3 " " $1 }' < <(registry_rows))
+	if [[ $existing == active* ]]; then
+		reject "此公鑰已在使用中（$existing）"
+	elif [[ -n $existing ]]; then
+		reject "此公鑰已被撤銷過（$existing），不可再用，請重新產生金鑰"
+	fi
+
+	local used
+	used=$(registry_rows | cut -f1)
+	if [[ -n $ip ]]; then
+		[[ $ip =~ ^${prefix//./\\.}([0-9]{1,3})$ ]] || reject "$type 的 IP 必須在 ${prefix}${lo}–${hi}：$ip"
+		local h=${BASH_REMATCH[1]}
+		((10#$h >= lo && 10#$h <= hi)) && [[ $h == "$((10#$h))" ]] || reject "$type 的 IP 必須在 ${prefix}${lo}–${hi}：$ip"
+		grep -qxF "$ip" <<<"$used" && reject "IP 已分配過（IP 不重複使用）：$ip"
+	else
+		local h
+		for ((h = lo; h <= hi; h++)); do
+			grep -qxF "$prefix$h" <<<"$used" || { ip="$prefix$h"; break; }
+		done
+		[[ -n $ip ]] || reject "$type 網段已無可用 IP"
+	fi
+
+	printf '%s\t%s\t%s\t%s\tactive\t%s\t%s\t%s\t\t\t\n' \
+		"$ip" "$type" "$name" "$pub" "$(now)" "$ACTOR" "$note" >>"$REGISTRY"
+	render_and_apply
+	audit "ADD type=$type name=$name ip=$ip pubkey=$pub note=\"$note\""
+
+	echo "已加入：$type $name → $ip/32"
+	if [[ $type == engineer ]]; then
+		echo
+		echo "---- 筆電設定（PrivateKey 填筆電自己的私鑰）----"
+		print_engineer_config "$ip"
+	else
+		echo "機器端 WireGuard 位址請設為 $ip/32（範本：whale-vpn-peer show-config $name）"
+	fi
+}
+
+cmd_revoke() {
+	local target="${1:-}" reason=""
+	[[ -n $target ]] || reject "參數不足：revoke <名稱|IP|公鑰> --reason ..."
+	shift
+	while (($#)); do
+		case $1 in
+		--reason) reason="${2:-}"; shift 2 ;;
+		*) reject "不認得的參數：$1" ;;
+		esac
+	done
+	[[ -n $reason ]] || reject "必須加 --reason"
+	reason=$(clean "$reason")
+
+	lock
+	local matches
+	matches=$(awk -F'\t' -v t="$target" '$5 == "active" && ($1 == t || $3 == t || $4 == t)' < <(registry_rows))
+	[[ -n $matches ]] || reject "找不到使用中的 peer：$target"
+	[[ $(wc -l <<<"$matches") -eq 1 ]] || reject "符合多筆，請改用 IP 或公鑰指定：$target"
+
+	local ip type name pub
+	IFS=$'\t' read -r ip type name pub _ <<<"$matches"
+
+	local tmp
+	tmp=$(mktemp "$STATE_DIR/.peers.tsv.XXXXXX")
+	awk -F'\t' -v OFS='\t' -v ip="$ip" -v ts="$(now)" -v by="$ACTOR" -v why="$reason" '
+		NR > 1 && $1 == ip && $5 == "active" { $5 = "revoked"; $9 = ts; $10 = by; $11 = why }
+		{ print }' "$REGISTRY" >"$tmp"
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$REGISTRY"
+
+	render_and_apply
+	audit "REVOKE type=$type name=$name ip=$ip pubkey=$pub reason=\"$reason\""
+	echo "已撤銷：$type $name（$ip）。此 IP 與公鑰都不會再被使用。"
+}
+
+cmd_list() {
+	local all="${1:-}"
+	{
+		printf 'IP\tTYPE\tNAME\tSTATUS\tADDED_AT\tADDED_BY\tNOTE\tPUBKEY\n'
+		awk -F'\t' -v all="$all" -v OFS='\t' 'all == "--all" || $5 == "active" {
+			print $1, $2, $3, $5, $6, $7, ($8 == "" ? "-" : $8), $4 }' < <(registry_rows)
+	} | LC_ALL=C.UTF-8 column -t -s $'\t'
+}
+
+cmd_show_config() {
+	local target="${1:-}" row
+	row=$(awk -F'\t' -v t="$target" '$5 == "active" && ($1 == t || $3 == t)' < <(registry_rows))
+	[[ -n $row && $(wc -l <<<"$row") -eq 1 ]] || die "找不到使用中的 peer：$target"
+	local ip type
+	IFS=$'\t' read -r ip type _ <<<"$row"
+	if [[ $type == engineer ]]; then print_engineer_config "$ip"; else print_machine_config "$ip"; fi
+}
+
+[[ -n $OP ]] || usage 1
+if [[ $OP == -h || $OP == --help ]]; then usage 0; fi
+if [[ $EUID -ne 0 && ${WHALE_VPN_ALLOW_NONROOT:-0} != 1 ]]; then
+	die "請用 sudo 執行"
+fi
+mkdir -p "$STATE_DIR" "$LOG_DIR"
+[[ -f $REGISTRY ]] || printf '%s\n' "$HEADER" >"$REGISTRY"
+shift
+ARGS="$*"
+
+case $OP in
+add) cmd_add "$@" ;;
+revoke) cmd_revoke "$@" ;;
+list) cmd_list "$@" ;;
+show-config) cmd_show_config "$@" ;;
+sync)
+	lock
+	render_and_apply
+	audit "SYNC"
+	echo "已依登錄簿重新產生並套用 $WG_CONF"
+	;;
+*) usage 1 ;;
+esac

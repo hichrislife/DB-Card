@@ -1,0 +1,66 @@
+#!/usr/sbin/nft -f
+# Whale 原廠遠端維護 VPN 防火牆。由 bootstrap.sh 從 nftables.conf.in 產生，勿手改；
+# 要改請改 repo 裡的範本後重跑 bootstrap.sh。
+#
+# 規則摘要：
+#   對外只開 UDP 51820（WireGuard）；伺服器管理 SSH 只允許 admin_ssh_* 集合內的來源。
+#   轉送只允許「工程師 10.8.1.0/24 → 機器 10.8.0.0/24 的 TCP 22」，每筆新連線記錄。
+#   機器↔機器、機器→工程師、任何人→外網一律丟棄。沒有 nat 表，不做 NAT、不當出口。
+
+flush ruleset
+
+define WG_IF = "wg0"
+define WG_PORT = __WG_PORT__
+define MACHINES = 10.8.0.0/24
+define ENGINEERS = 10.8.1.0/24
+
+table inet whale_vpn {
+	set admin_ssh_v4 {
+		type ipv4_addr
+		flags interval
+		__ADMIN_V4_ELEMENTS__
+	}
+
+	set admin_ssh_v6 {
+		type ipv6_addr
+		flags interval
+		__ADMIN_V6_ELEMENTS__
+	}
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+
+		ct state vmap { established : accept, related : accept, invalid : drop }
+		iif "lo" accept
+
+		# IPv6 運作必要的鄰居探索（不含 echo）
+		icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } ip6 hoplimit 255 accept
+
+		# 對外唯一開放的服務：WireGuard
+		udp dport $WG_PORT accept
+
+		# 伺服器自己的管理 SSH：只允許指定來源
+		tcp dport 22 ip saddr @admin_ssh_v4 accept
+		tcp dport 22 ip6 saddr @admin_ssh_v6 accept
+
+		# VPN 內只允許 ping 伺服器（10.8.0.1）做診斷
+		iifname $WG_IF icmp type echo-request limit rate 10/second accept
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+
+		ct state vmap { established : accept, related : accept, invalid : drop }
+
+		# 唯一允許的轉送：工程師 → 機器，只有 TCP 22。每筆新連線寫進連線紀錄。
+		iifname $WG_IF oifname $WG_IF ip saddr $ENGINEERS ip daddr $MACHINES tcp dport 22 ct state new log prefix "whale-vpn-ssh: " level info accept
+
+		# 其他（機器↔機器、機器→工程師、任何人→外網、非 22 埠）全部丟棄，限速記錄
+		iifname $WG_IF limit rate 10/minute burst 20 packets log prefix "whale-vpn-fwd-drop: " level info
+		counter drop
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+	}
+}

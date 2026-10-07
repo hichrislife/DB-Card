@@ -1,0 +1,34 @@
+# Whale VPN 連線紀錄：每月輪替、保留 24 個月（需求是至少 1 年）。
+# peer-admin.log 是 append-only（chattr +a），不輪替、永久保存。
+/var/log/whale-vpn/ssh-connections.log
+/var/log/whale-vpn/forward-drops.log
+{
+	su __LOG_OWNER__ adm
+	monthly
+	rotate 24
+	dateext
+	dateformat -%Y%m
+	compress
+	delaycompress
+	missingok
+	notifempty
+	create 0640 __LOG_OWNER__ adm
+	sharedscripts
+	postrotate
+		/usr/lib/rsyslog/rsyslog-rotate 2>/dev/null || systemctl kill -s HUP rsyslog.service
+	endscript
+}
+
+/var/log/whale-vpn/sessions.log
+{
+	su __LOG_OWNER__ adm
+	monthly
+	rotate 24
+	dateext
+	dateformat -%Y%m
+	compress
+	delaycompress
+	missingok
+	notifempty
+	create 0640 root adm
+}
