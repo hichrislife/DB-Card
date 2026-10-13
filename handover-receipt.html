@@ -200,7 +200,7 @@
 
   <div class="meta">
     <div class="field"><label>單號<small>No.</small></label><div class="val" contenteditable="true"></div></div>
-    <div class="field"><label>點交日期<small>Date</small></label><div class="val" contenteditable="true" id="today"></div></div>
+    <div class="field"><label>點交日期<small>Date</small></label><div class="val" contenteditable="true"></div></div>
     <div class="field"><label>案號 / 專案<small>Ref.</small></label><div class="val" contenteditable="true"></div></div>
   </div>
 
@@ -311,7 +311,7 @@
   </section>
 
   <footer>
-    <span>精虞科技有限公司 Whale Forensics Taiwan</span>
+    <span>精虞科技有限公司 Whale Forensics Taiwan｜臺灣服務中心：台北市信義區信義路五段5號4G05室｜電話：(02)2312-0050</span>
     <span>頁次 1 / 1</span>
   </footer>
 </main>
@@ -334,10 +334,6 @@
     }
     for (var i = 0; i < 7; i++) addRow();
     document.getElementById('addRow').addEventListener('click', addRow);
-
-    var d = new Date();
-    document.getElementById('today').textContent =
-      d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日';
   })();
 </script>
 </body>
