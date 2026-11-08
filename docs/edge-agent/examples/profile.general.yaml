@@ -17,10 +17,18 @@ small_models:                               # 配置 B：14B 佔主卡，小模�
   # 若改選 8B 基底，把 device 改為 cuda:0 即切回配置 A
 
 npu:
-  vendor_sdk: ${NPU_VENDOR}
+  vendor: deepx
+  device: DX-M1
+  runtime: dx-rt
   service: grpc://127.0.0.1:50061
-  tools: [vision.layout, vision.ocr_detect, vision.redact_faces, audio.vad]
+  tools: [vision.layout, vision.ocr_detect, vision.table_seal, vision.redact_faces, vision.kiosk]
+  calibration_dataset: data/npu-calib/
   llm_side_models_allowed: false
+  fallback_on_unhealthy: cpu_layout
+
+audio:
+  stt: faster-whisper-small-int8
+  vad: silero-vad
 
 network:
   online_sync: optional                     # 有網路時可直接同步，隨身碟為備援

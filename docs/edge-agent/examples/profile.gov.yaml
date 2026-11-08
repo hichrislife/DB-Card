@@ -16,10 +16,18 @@ small_models:                               # 配置 A：主卡共用
   fallback_device: cpu
 
 npu:
-  vendor_sdk: ${NPU_VENDOR}                 # hailo | axelera | deepx | other
+  vendor: deepx
+  device: DX-M1                             # 25 TOPS INT8, 4GB LPDDR5, M.2 2280
+  runtime: dx-rt                            # 版本以實際安裝為準，部署前確認模型庫清單
   service: grpc://127.0.0.1:50061
-  tools: [vision.layout, vision.ocr_detect, vision.redact_faces, audio.vad]
-  llm_side_models_allowed: false            # 嵌入／NLI 不得上 NPU，除非通過 1.2 節精度比對並由管理者改為 true
+  tools: [vision.layout, vision.ocr_detect, vision.table_seal, vision.redact_faces, vision.kiosk]
+  calibration_dataset: data/npu-calib/      # 自己場域的影像，INT8 校正用
+  llm_side_models_allowed: false            # 嵌入／重排／NLI／Whisper 不上 DX-M1（官方未證實支援）
+  fallback_on_unhealthy: cpu_layout         # NPU 異常時文件版面分析退回 CPU
+
+audio:
+  stt: faster-whisper-small-int8            # CPU
+  vad: silero-vad                           # CPU
 
 network:
   online_sync: false

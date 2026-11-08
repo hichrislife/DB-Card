@@ -1,6 +1,6 @@
 # 地端智能體架構設計（Edge Agent Design）
 
-> 適用硬體：13 代 i7 等級 CPU（約 16 核 / 24 執行緒）、64GB RAM、1TB SSD、RTX 5070 Ti（16GB GDDR7）、另一張 4GB 記憶體的 NPU 推論卡。
+> 適用硬體：13 代 i7 等級 CPU（約 16 核 / 24 執行緒）、64GB RAM、1TB SSD、RTX 5070 Ti（16GB GDDR7）、DeepX DX-M1 NPU（M.2 2280，25 TOPS INT8，4GB LPDDR5）。
 > 部署型態：同一套系統，以設定檔切換「公務機關（受管制）」與「一般（企業／個人）」兩種路徑，見第 2.5 節。
 > 設計目標：地端用戶可透過多工協調調動模組、自行修改模組；在離線環境下以隨身碟把「地端聽不懂的案例」帶到雲端版調整，再把更新帶回地端；所有輸出可追溯依據、無法核實即標示，不產生無依據的幻覺。
 
@@ -25,12 +25,12 @@
 
 ## 1. 硬體角色分工
 
-4GB 卡是 NPU，這改變了分工：市售邊緣 NPU（Hailo、Axelera、DeepX、Kinara 等）的編譯器主要支援 INT8 的視覺與部分 Transformer 編碼器模型，**不適合直接承接 LLM 相關的嵌入、重排、NLI 核實**，除非廠商 SDK 已有對應的已編譯模型且精度驗證過。因此預設把這些小模型移到主卡或 CPU，NPU 專責它擅長的事。
+4GB 卡是 DeepX DX-M1，這改變了分工：DX-M1 是第一代視覺導向 NPU，INT8 運算，官方 SDK 明列支援的是 YOLO、ViT、VLM 一類模型；BERT 類文字編碼器與 Whisper 沒有公開證實支援，LLM 則要等尚未出貨的 DX-M2。因此 **DX-M1 不承接嵌入、重排、NLI 核實與語音轉文字**，這些小模型放主卡或 CPU，DX-M1 專責它擅長的影像任務。DX-M1 的整合細節見附錄 A。
 
 | 元件 | 角色 | 載入內容 | 預估佔用 |
 |---|---|---|---|
 | RTX 5070 Ti 16GB | 主推論 + 小模型 | 主 LLM（4-bit 量化 8B）+ KV 快取 + 1～3 個 LoRA + 嵌入／重排／NLI（fp16） | LLM 約 5GB，KV 約 4GB（32K 上下文），小模型約 2.8GB，合計約 12GB |
-| 4GB NPU | 視覺與感知 | 文件版面分析、OCR 文字偵測、影像／證件去識別化、攝影機或 kiosk 影像分析、語音活動偵測；若 SDK 支援則加 whisper 編碼器 | 依廠商模型而定，4GB 足夠同時常駐 3～5 個視覺模型 |
+| DeepX DX-M1（4GB） | 視覺 | 文件版面分析、OCR 文字偵測、表格與印章偵測、影像／證件去識別化、攝影機或 kiosk 影像分析 | INT8 視覺模型多在數十 MB 等級，4GB 足夠同時常駐 5 個以上 |
 | CPU + 64GB RAM | 協調與資料層、備援推論 | 協調器、任務佇列、向量庫、全文索引、文件解析、規則引擎、評測；小模型的 CPU 備援（ONNX Runtime INT8） | 預留 16GB 給 LLM 溢出時的 CPU 卸載 |
 | 1TB SSD | 儲存 | 模型檔（約 60GB）、文件庫與索引、互動日誌、轉接器版本庫、評測集 | 建議模型與資料各分一個分割區 |
 
@@ -48,7 +48,7 @@
 - **先驗證再上線**：任何要搬到 NPU 的模型，用同一批資料跑 fp16 參考版本與 NPU 版本，嵌入模型比對檢索前 10 名重疊率（應 ≥ 0.9），NLI 比對判定一致率（應 ≥ 0.97），不達標就留在主卡或 CPU。
 - **NPU 走獨立服務**：用廠商 SDK 包成一個 gRPC／HTTP 服務，協調器只透過 MCP 工具呼叫（例如 `vision.layout`、`vision.ocr_detect`、`vision.redact_faces`），NPU 故障時這些工具回報不可用，LLM 主流程不受影響。
 - **把文件前處理交給它**：掃描件與 PDF 的版面分析、表格框線偵測、印章與簽名區域偵測，這些是 NPU 的強項，能把文件切塊品質拉高，間接提升檢索與核實的準確度。
-- **語音**：若廠商 SDK 有 whisper 或同級模型就用 NPU；沒有就用 CPU 跑 whisper small（faster-whisper INT8，約 2～3 倍實時速度），不佔主卡。
+- **語音不上 DX-M1**：用 CPU 跑 faster-whisper small INT8（約 2～3 倍實時速度），語音活動偵測用 Silero VAD（CPU）。若日後 DX 模型庫出現 Whisper 編碼器，再依第一點的驗證流程評估。
 
 **主模型選擇**（都以 4-bit 量化計）：
 
@@ -369,7 +369,7 @@ edge-update-v<版本>/
 | 主推論 | vLLM（多 LoRA、連續批次、OpenAI 相容 API） | 多工與 LoRA 熱切換是硬需求 |
 | 備援推論 | llama.cpp server | GGUF 彈性高、CPU 卸載方便，拿來跑 30B MoE |
 | 小模型服務 | 自寫 FastAPI 包 sentence-transformers / transformers；配置 A 綁主卡、配置 B 用 ONNX Runtime INT8 綁 CPU | 嵌入、重排、NLI 共用一個進程 |
-| NPU 服務 | 廠商 SDK（Hailo / Axelera / DeepX 等）包成獨立 gRPC 服務，以 MCP 工具曝露 | 版面分析、OCR 偵測、去識別化、語音前處理 |
+| NPU 服務 | DeepX DX-RT 包成獨立 gRPC 服務，以 MCP 工具曝露；DX-STREAM（GStreamer）處理攝影機串流 | 版面分析、OCR 偵測、表格與印章偵測、去識別化 |
 | 向量庫 | Qdrant 或 LanceDB | 單機、離線、支援過濾 |
 | 全文檢索 | Tantivy / Meilisearch 做 BM25，與向量結果混合 | 術語、編號類查詢靠關鍵字更準 |
 | 協調器 | LangGraph 或自寫狀態機 | 需要明確的狀態、重試與人工介入點 |
@@ -394,7 +394,8 @@ edge-update-v<版本>/
 
 ## 9. 已知限制與取捨
 
-- **4GB NPU 的廠商 SDK 決定它能接多少工作**。預設只給它視覺與感知任務；要把嵌入或 NLI 搬上去，必須先通過第 1.2 節的精度比對。
+- **DX-M1 只給視覺任務**。要把嵌入、NLI 或 Whisper 搬上去，前提是 DX 模型庫或 DX-COM 能編譯對應模型，且通過第 1.2 節的精度比對；目前公開資料沒有證實這一點。
+- **DX-M1 的 SDK 文件（developer.deepx.ai、docs.radxa.com）在本次撰寫環境無法存取**，附錄 A 的規格來自 DeepX 公開型錄與經銷商頁面，模型庫清單請在部署前以實際安裝的 SDK 版本為準。
 - 配置 A 把小模型放主卡，會把主 LLM 限制在 8B 等級；要用 14B 就要接受配置 B 的 CPU 延遲。
 - 16GB 主卡同時掛多個 LoRA 會吃掉約每個 100～300MB 的 VRAM，建議同時常駐不超過 4 個。
 - 32K 以上上下文會明顯壓縮可並行的對話數；長文件走「先檢索再回答」，不要整份塞進上下文。
@@ -411,3 +412,72 @@ edge-update-v<版本>/
 - `examples/verifier.policy.example.yaml`：核實閘門政策範例
 - `examples/profile.gov.yaml`：公務機關部署設定檔
 - `examples/profile.general.yaml`：一般部署設定檔
+
+---
+
+## 附錄 A：DeepX DX-M1 整合說明
+
+### A.1 規格（依 DeepX 公開型錄與經銷商資料）
+
+| 項目 | 數值 |
+|---|---|
+| 運算 | 25 TOPS（INT8） |
+| 記憶體 | 4GB LPDDR5，另有 QSPI NAND |
+| 介面 | M.2 2280 M-key，PCIe Gen3 x4 |
+| 功耗 | 典型 3W，最大 5W |
+| 主機 | x86 與 ARM，Linux |
+| 製程 | Samsung 5nm |
+
+### A.2 SDK 組成與工作流
+
+| 元件 | 用途 |
+|---|---|
+| DX-COM | 編譯器：ONNX（搭配量化設定檔）→ `.dxnn`。PyTorch、TensorFlow、Keras 模型須先轉 ONNX |
+| DX-RT | 執行期，C++ 與 Python API；本設計用它包成 gRPC 服務 |
+| DX-STREAM | GStreamer 外掛，攝影機與影片串流推論 |
+| DX-APP | 範例應用 |
+| DX-Model Zoo | 預編譯模型庫 |
+
+工作流：選模型 → 匯出 ONNX → 準備校正資料集（INT8 量化用，建議 200～500 張自己場域的影像）→ DX-COM 編譯 → 用第 1.2 節的方法比對精度 → 部署到 DX-RT 服務。
+
+### A.3 本設計分配給 DX-M1 的模型
+
+| MCP 工具 | 模型類型 | 用途 | 備註 |
+|---|---|---|---|
+| `vision.layout` | 版面分析（YOLO 系列，訓練於 DocLayNet／PubLayNet 類資料） | 把掃描件與 PDF 頁面切成標題、段落、表格、圖、頁首頁尾 | 直接提升文件切塊品質，是對 RAG 幫助最大的一項 |
+| `vision.ocr_detect` | 文字區域偵測（DBNet／YOLO 類） | 找出文字框，辨識交給 CPU 的 OCR 辨識模型 | DX-M1 只做偵測，辨識（序列模型）留在 CPU |
+| `vision.table_seal` | 表格框線、印章、簽名、手寫區偵測（YOLO） | 公文與表單的欄位定位、印章存在性檢查 | 公務情境常用 |
+| `vision.redact_faces` | 人臉與證件偵測（YOLO） | 影像匯入前去識別化，匯出包絕不帶可辨識人像 | 與 `gov` 設定檔的匯出政策配合 |
+| `vision.kiosk` | 人員偵測、姿態、物件（YOLO／ViT） | kiosk 或攝影機場景的即時分析 | 走 DX-STREAM |
+
+### A.4 明確不放在 DX-M1 的項目
+
+| 項目 | 原因 | 放哪裡 |
+|---|---|---|
+| 文字嵌入（bge-m3） | BERT 類文字編碼器未見於官方支援清單；INT8 量化對檢索品質影響需另驗 | 主卡（配置 A）或 CPU（配置 B） |
+| 重排序（bge-reranker） | 同上 | 同上 |
+| NLI 核實（mDeBERTa） | 同上，且核實是閘門，不接受精度折損 | 同上 |
+| Whisper | 未見於官方支援清單 | CPU（faster-whisper INT8） |
+| 任何 LLM | DX-M1 非 LLM 設計，LLM 導向的 DX-M2 尚未出貨 | 主卡 |
+
+### A.5 服務介面
+
+```
+npu-service (DX-RT, Python)
+  gRPC :50061
+  ├─ Health()                → 卡片狀態、溫度、已載入模型、佇列長度
+  ├─ Layout(image)           → [{type, bbox, score}]
+  ├─ DetectText(image)       → [{bbox, score}]
+  ├─ DetectTableSeal(image)  → [{type, bbox, score}]
+  ├─ RedactFaces(image)      → image, [{bbox}]
+  └─ Stream(camera_id)       → 事件流（走 DX-STREAM）
+```
+
+協調器把每個 RPC 包成同名 MCP 工具；`Health()` 回報異常時，這些工具標記為不可用，文件匯入流程退回純 CPU 版面分析（較慢但可用），LLM 主流程不受影響。
+
+### A.6 部署前要確認的事
+
+1. 實際安裝的 DX SDK 版本與其模型庫清單（本文件撰寫時無法存取 developer.deepx.ai 與 docs.radxa.com）。
+2. DX-M1 所在的 M.2 插槽是否為 PCIe Gen3 x4 以上且不與 NVMe 共用頻寬。
+3. Linux 核心版本與 DX-RT 驅動相容性。
+4. 校正資料集：用自己場域的掃描件與影像做 INT8 校正，不要用公開資料集的校正結果直接上線。
