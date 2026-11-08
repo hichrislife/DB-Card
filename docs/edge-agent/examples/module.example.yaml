@@ -1,0 +1,55 @@
+# 模組 manifest 範例：用戶可複製此資料夾後修改，不需寫程式
+name: 公文摘要
+version: 3
+description: >
+  將機關公文、簽呈或會議紀錄摘要為重點條列，保留文號、日期、承辦單位等關鍵欄位。
+owner: 文書科
+risk_level: low            # low: 任何用戶可修改並啟用；high: 修改後需管理者核准
+
+triggers:
+  natural_language:        # 協調器會把這些句子做向量嵌入，用來做路由比對
+    - 幫我摘要這份公文
+    - 這份簽呈重點是什麼
+    - 把會議紀錄整理成三點
+  keywords: [公文, 簽呈, 摘要, 重點]
+  slash: /公文摘要
+
+inputs:
+  type: object
+  required: [document]
+  properties:
+    document: { type: string, description: 公文全文或檔案路徑 }
+    style:    { type: string, enum: [簡潔, 完整], default: 簡潔 }
+
+outputs:
+  type: object
+  required: [summary, claims]
+  properties:
+    summary: { type: string }
+    claims:                  # 每個事實性主張必須帶來源片段 ID，供 Verifier 核實
+      type: array
+      items:
+        type: object
+        required: [text, sources]
+        properties:
+          text:    { type: string }
+          sources: { type: array, items: { type: string } }
+
+requires:
+  tools: [doc.parse, index.search]     # MCP 工具名稱，啟動時檢查
+  adapter: 公文風格-v3                  # 可選；指向 adapters/ 下的 LoRA
+  prompt: prompt.md
+
+grounding:
+  required: true           # 輸出必須通過核實閘門
+  min_entailment: 0.75     # 主張被來源蘊含的最低分數
+  on_neutral: flag         # flag: 標示「無法由來源確認」；drop: 刪除
+  on_contradiction: drop
+
+evals:
+  cases: evals/cases.jsonl # 修改模組後必須跑過
+  min_pass_rate: 0.9
+
+limits:
+  max_context_tokens: 12000
+  priority: interactive    # interactive > verify > tool > background > eval

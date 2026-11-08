@@ -1,0 +1,38 @@
+# 核實閘門政策：地端匯入器與 Verifier 共用
+verifier:
+  model: mDeBERTa-v3-base-xnli        # 放在 4GB 卡；多語 NLI
+  device: cuda:1
+  claim_splitter: sentence
+  skip_non_factual: true               # 問候、格式句不核實
+  thresholds:
+    entailment: 0.75
+    contradiction: 0.60
+  default_actions:
+    neutral: flag                      # 標示「⚠ 無法由來源確認」
+    contradiction: drop
+  high_risk_cross_check:
+    enabled: true
+    method: regenerate_and_compare     # 主模型換提示再生成一次，不一致者降級為無法確認
+
+retrieval:
+  min_rerank_score: 0.35               # 低於此值直接拒答並記錄事件
+  hybrid: { vector_weight: 0.6, bm25_weight: 0.4 }
+
+misunderstanding_event:
+  record_when:
+    - retrieval_below_threshold
+    - verifier_neutral_or_contradiction
+    - user_feedback_negative
+    - user_reselected_module
+    - unknown_term_without_definition
+  store_document_content: false
+
+update_gate:                           # 更新包上線前必須全部通過（地端重跑，不採信雲端報告）
+  faithfulness_max_drop: 0.01
+  contradictions_must_not_increase: true
+  module_eval_min_pass_rate: 0.9
+  canary:
+    fraction: 0.1
+    hours: 24
+    abort_if_user_correction_rate_increase: 0.2
+  keep_previous_versions: 2

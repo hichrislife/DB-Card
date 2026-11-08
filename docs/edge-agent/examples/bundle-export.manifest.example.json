@@ -1,0 +1,25 @@
+{
+  "format": "edge-export/1",
+  "node_id": "edge3-taipei-01",
+  "created_at": "2026-11-08T09:00:00+08:00",
+  "base_model": { "name": "Llama-3.1-TAIDE-LX-8B-Chat", "quant": "Q4_K_M", "sha256": "..." },
+  "adapters": [
+    { "name": "公文風格", "version": 3, "sha256": "..." }
+  ],
+  "data_classification": "internal",
+  "export_policy": {
+    "include_document_content": false,
+    "excluded_classifications": ["confidential", "secret"],
+    "pii_redaction": "regex+ner"
+  },
+  "files": {
+    "events/misunderstanding.jsonl": { "sha256": "...", "records": 412 },
+    "events/corrections.jsonl":      { "sha256": "...", "records": 87 },
+    "glossary.yaml":                 { "sha256": "...", "entries": 1530 },
+    "eval/golden.jsonl":             { "sha256": "...", "records": 120 },
+    "modules/":                      { "sha256": "...", "count": 6 },
+    "index_meta.jsonl":              { "sha256": "...", "records": 48210 }
+  },
+  "encryption": { "scheme": "age", "recipient": "age1cloudteacher..." },
+  "signature": { "alg": "ed25519", "key_id": "edge3-taipei-01", "sig": "..." }
+}
