@@ -1,5 +1,6 @@
 {
   "format": "edge-export/1",
+  "profile": "gov",
   "node_id": "edge3-taipei-01",
   "created_at": "2026-11-08T09:00:00+08:00",
   "base_model": { "name": "Llama-3.1-TAIDE-LX-8B-Chat", "quant": "Q4_K_M", "sha256": "..." },

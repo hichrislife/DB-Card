@@ -1,7 +1,7 @@
 # 核實閘門政策：地端匯入器與 Verifier 共用
 verifier:
-  model: mDeBERTa-v3-base-xnli        # 放在 4GB 卡；多語 NLI
-  device: cuda:1
+  model: mDeBERTa-v3-base-xnli        # 多語 NLI；位置由 profile 決定
+  device: ${profile.small_models.device}   # 配置 A: cuda:0（主卡）；配置 B: cpu
   claim_splitter: sentence
   skip_non_factual: true               # 問候、格式句不核實
   thresholds:

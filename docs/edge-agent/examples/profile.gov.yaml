@@ -1,0 +1,55 @@
+# 部署設定檔：公務機關（受管制）
+profile: gov
+description: 完全離線地端節點，雲端老師為機關內部或經核定的環境，不使用公有 LLM API。
+
+base_model:
+  allowed: [Llama-3.1-TAIDE-LX-8B-Chat, Llama-Breeze2-8B, gemma-3-12b-it-qat, Llama-3.1-8B-Instruct]
+  selected: Llama-3.1-TAIDE-LX-8B-Chat
+  quant: Q4_K_M
+  excluded_origins: [policy_restricted]     # 依機關最新資安規範維護的排除清單
+
+small_models:                               # 配置 A：主卡共用
+  device: cuda:0
+  embedding: BAAI/bge-m3
+  reranker: BAAI/bge-reranker-v2-m3
+  nli: MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+  fallback_device: cpu
+
+npu:
+  vendor_sdk: ${NPU_VENDOR}                 # hailo | axelera | deepx | other
+  service: grpc://127.0.0.1:50061
+  tools: [vision.layout, vision.ocr_detect, vision.redact_faces, audio.vad]
+  llm_side_models_allowed: false            # 嵌入／NLI 不得上 NPU，除非通過 1.2 節精度比對並由管理者改為 true
+
+network:
+  online_sync: false
+  usb_only: true
+
+teacher:
+  kind: onprem                              # OnPremTeacher
+  endpoint: https://teacher.internal        # 機關內部 GPU 伺服器或核定的政府雲端環境
+  model: 70B-class-open-model
+
+export_policy:
+  include_document_content: false
+  excluded_classifications: [confidential, secret, top_secret]
+  allowed_classifications: [public, internal]
+  pii_redaction: regex+ner
+  require_admin_approval: true
+
+module_governance:
+  low_risk_editable_by: [user, admin]
+  high_risk_editable_by: [admin]
+  high_risk_requires_approval_from: [security_officer]
+  record_approvals: true
+
+output:
+  disclosure_notice: 本內容由生成式 AI 協助產出，已附來源，請人工覆核後使用。
+  show_sources_inline: true
+
+audit:
+  retention_years: 5
+  append_only: true
+  hash_chain: true
+
+verifier_policy: verifier.policy.example.yaml   # 兩個設定檔共用，不可放寬
